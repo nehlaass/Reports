@@ -1,0 +1,134 @@
+---
+title: "Regression Segment improved"
+author: '220455224'
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+The data set we are using to showcase regression techniques is 'Global Food Wastage' from Kaggle. 
+Link: https://www.kaggle.com/datasets/atharvasoundankar/global-food-wastage-dataset-2018-2024
+After downloading the data set, set working directory to where the file is located.
+```{r}
+#change path to where the csv file is located
+setwd("C:/Machine Learning")
+```
+Now, let us tackle this question, "Can we predict economic loss due to food waste based on total waste, average waste per capita, population and household waste?" using regression techniques.
+
+Install the packages required
+```{r}
+install.packages("tidyverse")
+install.packages("caret")
+install.packages("glmnet")
+install.packages("randomForest")
+```
+Load the packages
+```{r}
+library(tidyverse)
+library(caret)
+library(glmnet)
+library(randomForest)
+```
+Read the csv file into a dataframe
+```{r}
+Fooddf <- read.csv("global_food_wastage_dataset.csv")
+```
+Check structure of dataframe
+```{r}
+str(Fooddf)
+```
+Rename columns
+```{r}
+colnames(Fooddf) <- c("Country", "Year", "Food_Category", "Total_Waste_Tons", 
+                       "Economic_Loss_Million", "Avg_Waste_per_Capita_Kg", 
+                       "Population_Million", "Household_Waste_Percent")
+
+print(colnames(Fooddf))
+```
+Remove rows with NA values
+```{r}
+Fooddf <- na.omit(Fooddf)
+head(Fooddf)
+```
+Checking the correlation
+```{r}
+cor(Fooddf[, c("Total_Waste_Tons", "Avg_Waste_per_Capita_Kg", "Population_Million", "Household_Waste_Percent")])
+```
+Scale the data
+```{r}
+Fooddf_scaled <- Fooddf
+Fooddf_scaled[, c("Total_Waste_Tons", "Avg_Waste_per_Capita_Kg", "Population_Million", "Household_Waste_Percent")] <- scale(Fooddf[, c("Total_Waste_Tons", "Avg_Waste_per_Capita_Kg", "Population_Million", "Household_Waste_Percent")])
+head(Fooddf_scaled)
+```
+Select features that we want to use and split data into training and testing sets
+```{r}
+set.seed(123) 
+trainIndex <- createDataPartition(Fooddf$Economic_Loss_Million, p = 0.8, list = FALSE)
+#Split
+train <- Fooddf_scaled[trainIndex, ]
+test <- Fooddf_scaled[-trainIndex, ]
+#Check the rows in dataframe
+head(train)
+```
+Multiple Linear regression
+```{r}
+lr_model <- lm(Economic_Loss_Million ~ Total_Waste_Tons + Avg_Waste_per_Capita_Kg + 
+               Population_Million + Household_Waste_Percent, data = train)
+
+summary(lr_model)
+```
+Plot a residual plot
+```{r}
+plot(lr_model$residuals)
+#Add a horizontal line at 0 to see the residuals' distribution
+abline(h = 0, col = "red")
+```
+Random Forest
+```{r}
+rf_model <- randomForest(Economic_Loss_Million ~ Total_Waste_Tons +         Avg_Waste_per_Capita_Kg + Population_Million + Household_Waste_Percent, data = train, ntree = 500)
+#See model's performance
+print(rf_model) 
+```
+Models evaluation
+```{r}
+#Each model predictions
+lr_pred <- predict(lr_model, test)
+rf_pred <- predict(rf_model, test)
+#Compute RMSE for each model
+lr_rmse <- sqrt(mean((lr_pred - test$Economic_Loss_Million)^2))
+rf_rmse <- sqrt(mean((rf_pred - test$Economic_Loss_Million)^2))
+#Print the results
+cat("Linear Regression RMSE:", lr_rmse, "\n")
+cat("Random Forest RMSE:", rf_rmse, "\n")
+```
+Plot predicted vs actual economic loss values
+```{r}
+#Retrieve predicted values from linear regression model
+predictions <- predict(lr_model, newdata = test)
+
+#Plot predicted vs actual economic loss
+ggplot(data = NULL, aes(x = test$Economic_Loss_Million, y = predictions)) +
+  geom_point(color = "blue") +
+  geom_smooth(method = "lm", color = "red") +
+  labs(x = "Actual Economic Loss ($ Million)", y = "Predicted Economic Loss ($ Million)",
+       title = "Predicted vs Actual Economic Loss") +
+  theme_minimal()
+```
+To determine whether the three other variables were strongly contributing to or being absorbed into total waste. 
+```{r}
+#Scale
+Fooddf_scaled2 <- Fooddf
+Fooddf_scaled2[, c("Avg_Waste_per_Capita_Kg", "Population_Million", "Household_Waste_Percent")] <- scale(Fooddf[, c("Avg_Waste_per_Capita_Kg", "Population_Million", "Household_Waste_Percent")])
+#Split the data
+set.seed(123) 
+trainIndex2 <- createDataPartition(Fooddf$Total_Waste_Tons, p = 0.8, list = FALSE)
+#Split
+train2 <- Fooddf_scaled2[trainIndex2, ]
+test2 <- Fooddf_scaled2[-trainIndex2, ]
+#Check the rows in dataframe
+head(train2)
+#Train the model with total waste as the target variable
+lr_model2 <- lm(Total_Waste_Tons ~ Avg_Waste_per_Capita_Kg + 
+                 Population_Million + Household_Waste_Percent, data = train2)
+
+summary(lr_model2)
+```

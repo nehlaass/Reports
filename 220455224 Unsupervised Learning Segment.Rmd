@@ -1,0 +1,215 @@
+---
+title: " 220455224 Unsupervised learning segment"
+author: '220455224'
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+The data set we are using to showcase unsupervised learning techniques is 'Resale Flat Prices' from data.gov.sg. 
+Link: https://data.gov.sg/datasets?page=3&query=&formats=CSV&resultId=d_ebc5ab87086db484f88045b47411ebc5
+After downloading the data set, set working directory to where the file is located.
+```{r}
+#change path to where the csv file is located
+setwd("C:/Machine Learning")
+```
+Install the packages required
+```{r}
+install.packages("dplyr")
+install.packages("cluster")
+install.packages("factoextra")
+install.packages("ggplot2")
+```
+Load the packages
+```{r}
+library(dplyr)
+library(factoextra)
+library(ggplot2)
+library(cluster)
+```
+Read the csv file into a dataframe
+```{r}
+df <- read.csv("ResaleFlatPricesBasedonApprovalDate19901999.csv")
+```
+Research question: Can we cluster the houses by flat types? How does flat type affect variables?
+
+Filter for years 1990 to 1991.
+```{r}
+#Extract year from the 'month' column
+df$year <- as.numeric(substr(df$month, 1, 4))
+#Filter for years 1990 to 1991
+df_filtered <- df %>%
+  filter(year >= 1990 & year <= 1991)
+```
+Check number of flat types
+```{r}
+unique(df_filtered$flat_type)
+```
+Convert flat type to numeric
+```{r}
+df_filtered$flat_type_numeric <- as.numeric(factor(df_filtered$flat_type, levels = unique(df_filtered$flat_type)))
+```
+Select variables that will be used and remove missing values if present
+```{r}
+clustdf <- df_filtered %>%
+  select(flat_type_numeric, floor_area_sqm, resale_price) %>%
+  na.omit()
+```
+Take a random sample of 10000
+```{r}
+set.seed(123) 
+sampledf<- clustdf %>% sample_n(min(n(), 10000)) 
+```
+Normalise the data
+```{r}
+scaledsampledf <- as.data.frame(scale(sampledf))
+```
+Find out optimal number of clusters
+```{r}
+fviz_nbclust(scaledsampledf, kmeans, method = "wss")
+```
+Using k-means clustering
+```{r}
+set.seed(123)
+k <- 3
+km_result <- kmeans(scaledsampledf, centers = k, nstart = 25)
+
+#Add the K-Means cluster labels
+scaledsampledf$kmeans_cluster <- as.factor(km_result$cluster)
+
+#Visualise clusters
+ggplot(scaledsampledf, aes(x = floor_area_sqm, y = resale_price, color = kmeans_cluster)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "Cluster Visualization (1990-1991 Flats)", x = "Floor Area (scaled)", y = "Resale Price (scaled)") +
+  theme_minimal()
+```
+Find out value of WCSS at k=3
+```{r}
+km_result$tot.withinss
+```
+Using Hierarchical Clustering
+```{r}
+#Compute distance matrix
+dist_matrix <- dist(scaledsampledf, method = "euclidean")
+#Perform hierarchical clustering
+hc_result <- hclust(dist_matrix, method = "ward.D2")
+
+#Plot dendrogram
+plot(hc_result, labels = FALSE, main = "Hierarchical Clustering Dendrogram (1990-1991 Flats)", sub = "", xlab = "")
+#Add rectangles to indicate clusters
+rect.hclust(hc_result, k = k, border = "red")
+
+#cut the tree according to k=3
+k <- 3
+#Add cluster label to scaledsampledf
+scaledsampledf$hierarchical_cluster <- cutree(hc_result, k)  
+
+#Check scaledsampledf
+head(scaledsampledf) 
+```
+
+Comparison for k-means and hierarchical clusters
+```{r}
+kmeans_cluster_sizes <- table(km_result$cluster)
+hc_cluster_sizes <- table(scaledsampledf$hierarchical_cluster)
+
+# Print cluster sizes for comparison
+cat("K-Means Cluster Sizes:\n")
+print(kmeans_cluster_sizes)
+cat("\nHierarchical Cluster Sizes:\n")
+print(hc_cluster_sizes)
+```
+Find the means of each variable in each clustering technique
+```{r}
+#k-means 
+aggregate(scaledsampledf[, c("flat_type_numeric", "floor_area_sqm", "resale_price")],
+          by = list(kmeans_cluster = scaledsampledf$kmeans_cluster), 
+          FUN = mean)
+
+#hierarchical 
+aggregated_data <- aggregate(scaledsampledf[, c("flat_type_numeric", "floor_area_sqm", "resale_price")],
+                             by = list(hierarchical_cluster = scaledsampledf$hierarchical_cluster), 
+                             FUN = mean)
+#Display aggregated data for hierarchical clustering
+print(aggregated_data)
+```
+
+Reassign hierarchical clusters based on results
+```{r}
+#Create a mapping to swap Hierarchical cluster labels 2 and 3
+scaledsampledf$cluster_swapped <- scaledsampledf$hierarchical_cluster
+
+#Swap the cluster 2 to 3 and cluster 3 to 2
+scaledsampledf$cluster_swapped[scaledsampledf$hierarchical_cluster == 2] <- 3
+scaledsampledf$cluster_swapped[scaledsampledf$hierarchical_cluster == 3] <- 2
+
+#Ensure 'cluster_swapped' is a factor
+scaledsampledf$cluster_swapped <- as.factor(scaledsampledf$cluster_swapped)
+
+#Check if it is reassigned correctly
+table(scaledsampledf$cluster_swapped)
+```
+Visualise the updated hierarchical clustering
+```{r}
+fviz_cluster(list(data = scaledsampledf[, c("flat_type_numeric", "floor_area_sqm", "resale_price")], 
+                  cluster = scaledsampledf$cluster_swapped),
+             geom = "point", stand = FALSE, ellipse = TRUE,
+             main = "Cluster Visualization (Hierarchical Clustering with Swapped Labels)")
+```
+Compare sizes of reassigned clusters
+```{r}
+#Hierarchical clusters
+newhc_cluster_sizes <- table(scaledsampledf$cluster_swapped)
+cat("\nReassigned Hierarchical Cluster Sizes:\n")
+print(newhc_cluster_sizes)
+#k-means clusters
+cat("\nK-Means Cluster Sizes:\n")
+print(kmeans_cluster_sizes)
+```
+Silhuoette Scores; higher values indicates better-defined clusters
+```{r}
+#k-means 
+kmeans_silhouette <- silhouette(km_result$cluster, dist_matrix)
+#Extract the silhouette scores and calculate the mean
+kmeans_silhouette_score <- mean(kmeans_silhouette[, 3])
+#Print the mean silhouette score
+print(kmeans_silhouette_score)
+
+#hierarchical 
+hc_silhouette <- silhouette(as.numeric(scaledsampledf$cluster_swapped), dist_matrix)
+#Extract the silhouette scores and calculate the mean
+hc_silhouette_score <- mean(hc_silhouette[, 3])
+#Print the mean silhouette score
+print(hc_silhouette_score)
+```
+Perform PCA on scaled data
+```{r}
+#Perform PCA 
+numeric_data <- scaledsampledf[, c("flat_type_numeric", "floor_area_sqm", "resale_price")]
+pca_result <- prcomp(numeric_data, scale. = TRUE)
+#Convert PCA result to data frame
+pca_data <- as.data.frame(pca_result$x)
+#Visualise the clusters using PCA (K-Means clusters)
+fviz_cluster(km_result, data = pca_data,
+             geom = "point", stand = FALSE, ellipse = TRUE,
+             main = "K-Means Clustering Visualization (PCA Reduced)")
+```
+Plot boxplot for Floor Area (sqm) by Flat Type
+```{r}
+ggplot(df_filtered, aes(x = factor(flat_type), y = floor_area_sqm, fill = factor(flat_type))) +
+  geom_boxplot() +
+  labs(title = "Floor Area Distribution by Flat Type", 
+       x = "Flat Type", 
+       y = "Floor Area (Square Meters)") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set3")
+```
+Plot boxplot for Resale Price vs Flat Type
+```{r}
+ggplot(df_filtered, aes(x = factor(flat_type), y = resale_price, fill = factor(flat_type))) +
+  geom_boxplot() +
+  labs(title = "Resale Price (SGD) by Flat Type", 
+       x = "Flat Type", 
+       y = "Resale Price (SGD)") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set3")
+```
